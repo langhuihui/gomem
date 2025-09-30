@@ -1,4 +1,4 @@
-//go:build !enable_buddy
+//go:build !enable_buddy && !disable_rm
 
 package gomem
 

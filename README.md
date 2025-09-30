@@ -1,5 +1,11 @@
 # GoMem
 
+[![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat-square&logo=go)](https://golang.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/langhuihui/gomem?style=flat-square)](https://goreportcard.com/report/github.com/langhuihui/gomem)
+
+> **Language**: [English](README.md) | [中文](README_CN.md)
+
 GoMem is a high-performance memory allocator library for Go, extracted from the Monibuca project.
 
 ## Features
@@ -98,9 +104,130 @@ n, err := reader.Read(buf)
 ## Performance Considerations
 
 - Use `enable_buddy` build tag for better memory pooling in high-throughput scenarios
-- Use `disable_rm` build tag to reduce overhead when recyclable memory is not needed
-- Use `twotree` build tag for more balanced allocation performance
+- **RecyclableMemory enabled is 53% faster** than disabled version and uses less memory
+- Use `disable_rm` build tag only when you don't need memory management features (reduces complexity but sacrifices performance)
+- **Single-tree allocator is significantly faster** than two-tree allocator (77-86% faster for allocation operations)
+- Use `twotree` build tag only if you need faster find operations (100% faster than single-tree)
+
+## Benchmark Results
+
+The following benchmark results were obtained on Apple M2 Pro (ARM64) with Go 1.23.0:
+
+### Single-Tree vs Two-Tree Allocator Performance Comparison
+
+| Operation Type | Single-Tree (ns/op) | Two-Tree (ns/op) | Performance Difference | Winner |
+|----------------|-------------------|------------------|----------------------|--------|
+| **Basic Allocation** | 12.33 | 22.71 | **84% faster** | Single-Tree |
+| **Small Allocation (64B)** | 12.32 | 22.60 | **84% faster** | Single-Tree |
+| **Large Allocation (8KB)** | 12.14 | 22.61 | **86% faster** | Single-Tree |
+| **Sequential Allocation** | 1961 | 3467 | **77% faster** | Single-Tree |
+| **Random Allocation** | 12.47 | 23.02 | **85% faster** | Single-Tree |
+| **Find Operation** | 3.03 | 1.51 | **100% faster** | Two-Tree |
+| **GetFreeSize** | 3.94 | 4.27 | **8% faster** | Single-Tree |
+
+**Key Findings:**
+- Single-tree allocator is **77-86% faster** for memory allocation operations
+- Two-tree allocator is **100% faster** for find operations only
+- Single-tree allocator is recommended for most use cases due to superior allocation performance
+
+### RecyclableMemory Performance Comparison (RM Enabled vs Disabled)
+
+| Operation Type | RM Enabled (ns/op) | RM Disabled (ns/op) | Performance Difference | Memory Usage |
+|----------------|-------------------|---------------------|----------------------|--------------|
+| **Basic Operations** | 335.2 | 511.9 | **53% faster** | Enabled: 1536B/2 allocs, Disabled: 1788B/2 allocs |
+| **Multiple Allocations** | - | 1035.1 | - | Disabled: 3875B/10 allocs |
+| **Clone Operations** | - | 53.7 | - | Disabled: 240B/1 alloc |
+
+**Key Findings:**
+- RecyclableMemory enabled is **53% faster** for basic operations
+- RM enabled uses less memory (1536B vs 1788B for basic operations)
+- RM enabled provides true memory management with recycling capabilities
+- RM disabled uses simple `make([]byte, size)` without memory pooling
+
+### Memory Allocator Performance (Single-Tree)
+
+| Benchmark | Operations/sec | Time/op | Memory/op | Allocs/op |
+|-----------|----------------|---------|-----------|-----------|
+| Allocate | 96,758,520 | 15.08 ns | 0 B | 0 |
+| AllocateSmall | 98,864,434 | 12.49 ns | 0 B | 0 |
+| AllocateLarge | 100,000,000 | 12.65 ns | 0 B | 0 |
+| SequentialAlloc | 1,321,965 | 942.2 ns | 0 B | 0 |
+| RandomAlloc | 96,241,566 | 12.79 ns | 0 B | 0 |
+| GetFreeSize | 303,367,089 | 3.934 ns | 0 B | 0 |
+
+### Memory Operations Performance
+
+| Benchmark | Operations/sec | Time/op | Memory/op | Allocs/op |
+|-----------|----------------|---------|-----------|-----------|
+| PushOne | 31,982,593 | 35.05 ns | 143 B | 0 |
+| Push | 17,666,751 | 70.40 ns | 259 B | 0 |
+| ToBytes | 119,496 | 11,806 ns | 106,496 B | 1 |
+| CopyTo | 417,379 | 2,905 ns | 0 B | 0 |
+| Append | 979,598 | 1,859 ns | 7,319 B | 0 |
+| Count | 1,000,000,000 | 0.3209 ns | 0 B | 0 |
+| Range | 32,809,593 | 36.08 ns | 0 B | 0 |
+
+### Memory Reader Performance
+
+| Benchmark | Operations/sec | Time/op | Memory/op | Allocs/op |
+|-----------|----------------|---------|-----------|-----------|
+| Read | 10,355,643 | 112.4 ns | 112 B | 2 |
+| ReadByte | 536,228 | 2,235 ns | 56 B | 2 |
+| ReadBytes | 2,556,602 | 608.7 ns | 1,080 B | 18 |
+| ReadBE | 408,663 | 3,587 ns | 56 B | 2 |
+| Skip | 8,762,934 | 125.8 ns | 56 B | 2 |
+| Range | 15,608,808 | 70.99 ns | 80 B | 2 |
+| RangeN | 20,101,638 | 79.09 ns | 80 B | 2 |
+| LEB128Unmarshal | 356,560 | 3,052 ns | 56 B | 2 |
+
+### Buddy Allocator Performance
+
+| Benchmark | Operations/sec | Time/op | Memory/op | Allocs/op |
+|-----------|----------------|---------|-----------|-----------|
+| Alloc | 4,017,826 | 388.2 ns | 0 B | 0 |
+| AllocSmall | 3,092,535 | 410.7 ns | 0 B | 0 |
+| AllocLarge | 3,723,950 | 276.4 ns | 0 B | 0 |
+| SequentialAlloc | 62,786 | 17,997 ns | 0 B | 0 |
+| RandomAlloc | 3,249,220 | 357.8 ns | 0 B | 0 |
+| Pool | 27,800 | 56,846 ns | 196,139 B | 0 |
+| NonPowerOf2 | 3,167,425 | 317.8 ns | 0 B | 0 |
+
+### Performance Summary
+
+- **Single-Tree Allocator**: Extremely fast allocation/deallocation with ~12ns per operation and zero memory allocations
+- **Two-Tree Allocator**: Slower allocation (~23ns per operation) but faster find operations (~1.5ns vs ~3ns)
+- **RecyclableMemory Enabled**: 53% faster than disabled version with better memory efficiency
+- **RecyclableMemory Disabled**: Simpler implementation but slower performance and higher memory usage
+- **Memory Operations**: Efficient buffer management with minimal overhead
+- **Memory Reader**: High-performance reading with zero-copy operations
+- **Buddy Allocator**: Fast power-of-2 allocation with pool support for reduced GC pressure
+
+**Recommendations**: 
+- Use single-tree allocator (default) for most applications due to superior allocation performance
+- Keep RecyclableMemory enabled (default) for better performance and memory efficiency
+- Only use two-tree allocator if find operations are critical and frequent
+- Only use `disable_rm` tag when you don't need memory management features
 
 ## License
 
 MIT
+
+---
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Support
+
+If you have any questions or need help, please open an issue on GitHub.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=langhuihui/gomem&type=Date)](https://star-history.com/#langhuihui/gomem&Date)
+
+---
+
+<div align="center">
+  <sub>Built with ❤️ by the GoMem team</sub>
+</div>
