@@ -1,5 +1,47 @@
 //go:build !disable_rm
 
+/*
+Package gomem provides efficient memory management and buffer operations for Go applications.
+This file contains the RecyclableMemory and memory allocator implementations, which provide
+advanced memory management capabilities with automatic recycling and scalable allocation.
+
+RecyclableMemory extends the basic Memory functionality with automatic memory recycling,
+allowing for efficient reuse of allocated memory blocks. The memory allocators provide
+different strategies for memory allocation, from simple fixed-size allocators to scalable
+multi-tier allocators that can grow dynamically based on demand.
+
+Key features:
+- RecyclableMemory with automatic memory recycling
+- ScalableMemoryAllocator for dynamic memory pool management
+- MemoryAllocator for fixed-size memory pools
+- Support for borrowing memory (temporary allocation)
+- Automatic cleanup and memory reuse
+- Integration with io.Reader for efficient data reading
+- Memory statistics and monitoring capabilities
+
+Example usage:
+
+	// Create a scalable memory allocator
+	allocator := NewScalableMemoryAllocator(1024 * 1024) // 1MB initial size
+
+	// Create recyclable memory
+	rm := NewRecyclableMemory(allocator)
+	rm.InitRecycleIndexes(10) // Reserve space for 10 allocations
+
+	// Allocate memory
+	data := rm.NextN(1024) // Allocate 1KB
+	copy(data, []byte("Hello, World!"))
+
+	// Allocate more memory
+	moreData := rm.NextN(512) // Allocate 512 bytes
+
+	// Use the memory...
+
+	// Recycle all allocated memory back to the allocator
+	rm.Recycle()
+
+	// The memory is now available for reuse
+*/
 package gomem
 
 import (
@@ -19,6 +61,7 @@ func NewRecyclableMemory(allocator *ScalableMemoryAllocator) RecyclableMemory {
 	return RecyclableMemory{allocator: allocator}
 }
 
+// InitRecycleIndexes init the recycle indexes, if not init, Recycle will free all the memory
 func (r *RecyclableMemory) InitRecycleIndexes(max int) {
 	if r.recycleIndexes == nil {
 		r.recycleIndexes = make([]int, 0, max)
@@ -29,6 +72,7 @@ func (r *RecyclableMemory) GetAllocator() *ScalableMemoryAllocator {
 	return r.allocator
 }
 
+// NextN allocate size bytes and add the index to the recycle indexes
 func (r *RecyclableMemory) NextN(size int) (memory []byte) {
 	memory = r.allocator.Malloc(size)
 	if r.recycleIndexes != nil {
@@ -38,6 +82,7 @@ func (r *RecyclableMemory) NextN(size int) (memory []byte) {
 	return
 }
 
+// AddRecycleBytes add the bytes will be recycled
 func (r *RecyclableMemory) AddRecycleBytes(b []byte) {
 	if r.recycleIndexes != nil {
 		r.recycleIndexes = append(r.recycleIndexes, r.Count())
@@ -100,6 +145,7 @@ func (ma *MemoryAllocator) free(start, size int) (ret bool) {
 	return true
 }
 
+// GetBlocks return the blocks of the allocator
 func (ma *MemoryAllocator) GetBlocks() (blocks []*Block) {
 	return ma.allocator.GetBlocks()
 }
@@ -224,6 +270,7 @@ func (sma *ScalableMemoryAllocator) Read(reader io.Reader, n int) (mem []byte, e
 	return
 }
 
+// FreeRest keep the first keep bytes and free the rest
 func (sma *ScalableMemoryAllocator) FreeRest(mem *[]byte, keep int) {
 	if m := *mem; keep < len(m) {
 		sma.Free(m[keep:])

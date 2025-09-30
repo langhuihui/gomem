@@ -1,3 +1,58 @@
+/*
+Package gomem provides efficient memory management and buffer operations for Go applications.
+This file contains the MemoryReader implementation, which provides sequential reading
+capabilities for Memory structs with support for various data formats and reading patterns.
+
+MemoryReader implements the io.Reader interface and extends it with additional functionality
+for reading structured data, handling different byte orders, and managing reading state
+across multiple buffer segments. It's designed for scenarios where you need to parse
+or process data sequentially from a Memory struct.
+
+Key features:
+- Implements io.Reader interface for standard Go I/O compatibility
+- Support for reading individual bytes, byte arrays, and structured data
+- Big-endian and little-endian number reading capabilities
+- LEB128 (Little Endian Base 128) variable-length integer decoding
+- Efficient skipping and seeking operations
+- Support for unreading (moving backwards in the data stream)
+- Range operations for iterating over remaining data
+- Memory clipping operations for removing processed data
+
+Example usage:
+
+	// Create a Memory with some data
+	mem := NewMemory([]byte("Hello, World!"))
+	reader := mem.NewReader()
+
+	// Read individual bytes
+	b1, _ := reader.ReadByte()
+	b2, _ := reader.ReadByte()
+	fmt.Printf("First two bytes: %c%c\n", b1, b2) // Output: "He"
+
+	// Read multiple bytes at once
+	buf := make([]byte, 5)
+	n, _ := reader.Read(buf)
+	fmt.Printf("Read %d bytes: %s\n", n, string(buf)) // Output: "Read 5 bytes: llo, "
+
+	// Skip some bytes
+	reader.Skip(2) // Skip " W"
+
+	// Read remaining data
+	remaining, _ := reader.ReadBytes(reader.Length)
+	fmt.Printf("Remaining: %s\n", string(remaining)) // Output: "Remaining: orld!"
+
+	// Example with LEB128 decoding
+	leb128Data := []byte{0xE5, 0x8E, 0x26} // LEB128 encoded 624485
+	reader2 := NewReadableBuffersFromBytes(leb128Data)
+	value, bytesRead, _ := reader2.LEB128Unmarshal()
+	fmt.Printf("LEB128 value: %d, bytes read: %d\n", value, bytesRead)
+
+	// Example with big-endian reading
+	beData := []byte{0x12, 0x34, 0x56, 0x78} // Big-endian 32-bit integer
+	reader3 := NewReadableBuffersFromBytes(beData)
+	beValue, _ := reader3.ReadBE(4)
+	fmt.Printf("Big-endian value: 0x%X\n", beValue) // Output: "Big-endian value: 0x12345678"
+*/
 package gomem
 
 import (
@@ -10,6 +65,8 @@ type MemoryReader struct {
 	Length, offset0, offset1 int
 }
 
+// NewReadableBuffersFromBytes creates a new MemoryReader from multiple byte slices.
+// All provided byte slices are combined into a single Memory and wrapped in a MemoryReader.
 func NewReadableBuffersFromBytes(b ...[]byte) MemoryReader {
 	buf := &Memory{Buffers: b}
 	for _, level0 := range b {
@@ -20,24 +77,35 @@ func NewReadableBuffersFromBytes(b ...[]byte) MemoryReader {
 
 var _ io.Reader = (*MemoryReader)(nil)
 
+// Offset returns the current reading position offset from the beginning.
+// This represents how many bytes have been read from the Memory.
 func (r *MemoryReader) Offset() int {
 	return r.Size - r.Length
 }
 
+// Pop is not supported for MemoryReader and will panic if called.
+// This method exists to satisfy interface requirements but should not be used.
 func (r *MemoryReader) Pop() []byte {
 	panic("ReadableBuffers Pop not allowed")
 }
 
+// GetCurrent returns the current buffer slice starting from the current reading position.
+// This provides access to the remaining data in the current buffer.
 func (r *MemoryReader) GetCurrent() []byte {
 	return r.Memory.Buffers[r.offset0][r.offset1:]
 }
 
+// MoveToEnd moves the reading position to the end of all data.
+// This effectively marks all data as read and sets the remaining length to zero.
 func (r *MemoryReader) MoveToEnd() {
 	r.offset0 = r.Count()
 	r.offset1 = 0
 	r.Length = 0
 }
 
+// Read implements the io.Reader interface, reading data into the provided buffer.
+// Returns the number of bytes read and any error that occurred.
+// Will return io.EOF when no more data is available.
 func (r *MemoryReader) Read(buf []byte) (actual int, err error) {
 	if r.Length == 0 {
 		return 0, io.EOF
@@ -78,6 +146,9 @@ func (r *MemoryReader) Read(buf []byte) (actual int, err error) {
 	}
 	return
 }
+
+// ReadByteTo reads multiple bytes and stores them in the provided byte pointers.
+// Returns an error if any byte cannot be read (including io.EOF).
 func (r *MemoryReader) ReadByteTo(b ...*byte) (err error) {
 	for i := range b {
 		if r.Length == 0 {
@@ -91,6 +162,8 @@ func (r *MemoryReader) ReadByteTo(b ...*byte) (err error) {
 	return
 }
 
+// ReadByteMask reads a byte and applies a bit mask to it.
+// Returns the masked byte value and any error that occurred during reading.
 func (r *MemoryReader) ReadByteMask(mask byte) (byte, error) {
 	b, err := r.ReadByte()
 	if err != nil {
@@ -99,6 +172,8 @@ func (r *MemoryReader) ReadByteMask(mask byte) (byte, error) {
 	return b & mask, nil
 }
 
+// ReadByte reads a single byte from the current position.
+// Returns the byte value and any error that occurred (including io.EOF).
 func (r *MemoryReader) ReadByte() (b byte, err error) {
 	if r.Length == 0 {
 		return 0, io.EOF
@@ -113,6 +188,9 @@ func (r *MemoryReader) ReadByte() (b byte, err error) {
 	return
 }
 
+// LEB128Unmarshal decodes a LEB128 (Little Endian Base 128) variable-length integer.
+// Returns the decoded value, the number of bytes consumed, and any error.
+// LEB128 is commonly used in binary protocols for encoding variable-length integers.
 func (r *MemoryReader) LEB128Unmarshal() (uint, int, error) {
 	v := uint(0)
 	n := 0
@@ -134,6 +212,9 @@ func (r *MemoryReader) LEB128Unmarshal() (uint, int, error) {
 func (r *MemoryReader) getCurrentBufLen() int {
 	return len(r.Memory.Buffers[r.offset0]) - r.offset1
 }
+
+// Skip advances the reading position by n bytes without reading the data.
+// Returns an error if trying to skip beyond the available data (io.EOF).
 func (r *MemoryReader) Skip(n int) error {
 	if n <= 0 {
 		return nil
@@ -156,6 +237,8 @@ func (r *MemoryReader) Skip(n int) error {
 	return nil
 }
 
+// Unread moves the reading position backwards by n bytes.
+// This allows "unreading" data that was previously read.
 func (r *MemoryReader) Unread(n int) {
 	r.Length += n
 	r.offset1 -= n
@@ -177,6 +260,8 @@ func (r *MemoryReader) skipBuf() {
 	r.offset1 = 0
 }
 
+// ReadBytes reads exactly n bytes and returns them as a new byte slice.
+// Returns an error if fewer than n bytes are available (io.EOF).
 func (r *MemoryReader) ReadBytes(n int) ([]byte, error) {
 	if n > r.Length {
 		return nil, io.EOF
@@ -186,6 +271,8 @@ func (r *MemoryReader) ReadBytes(n int) ([]byte, error) {
 	return b[:actual], err
 }
 
+// ReadBE reads n bytes in big-endian order and returns them as a uint32.
+// The most significant byte is read first, followed by less significant bytes.
 func (r *MemoryReader) ReadBE(n int) (num uint32, err error) {
 	for i := range n {
 		b, err := r.ReadByte()
@@ -197,6 +284,8 @@ func (r *MemoryReader) ReadBE(n int) (num uint32, err error) {
 	return
 }
 
+// Range iterates over all remaining data, calling the yield function for each buffer segment.
+// If yield is nil, it moves the reading position to the end without processing data.
 func (r *MemoryReader) Range(yield func([]byte)) {
 	if yield != nil {
 		for r.Length > 0 {
@@ -208,6 +297,8 @@ func (r *MemoryReader) Range(yield func([]byte)) {
 	}
 }
 
+// RangeN iterates over up to n bytes of remaining data, calling the yield function for each buffer segment.
+// Stops when n bytes have been processed or no more data is available.
 func (r *MemoryReader) RangeN(n int, yield func([]byte)) {
 	for good := yield != nil; r.Length > 0 && n > 0; r.skipBuf() {
 		curBuf := r.GetCurrent()
@@ -222,6 +313,9 @@ func (r *MemoryReader) RangeN(n int, yield func([]byte)) {
 	}
 }
 
+// ClipFront removes the already-read data from the front of the Memory.
+// The yield function is called for each buffer segment being removed.
+// This is useful for memory management when you want to free up processed data.
 func (r *MemoryReader) ClipFront(yield func([]byte) bool) {
 	offset := r.Size - r.Length
 	if offset == 0 {
