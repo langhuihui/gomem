@@ -54,6 +54,42 @@ func main() {
 }
 ```
 
+### 分段内存释放
+
+```go
+package main
+
+import "github.com/langhuihui/gomem"
+
+func main() {
+    // 创建一个可扩展的内存分配器
+    allocator := gomem.NewScalableMemoryAllocator(1024)
+    
+    // 分配一大块内存
+    buf := allocator.Malloc(1024)
+    
+    // 使用内存的不同部分
+    part1 := buf[0:256]    // 前256字节
+    part2 := buf[256:512]  // 中间256字节  
+    part3 := buf[512:1024] // 后512字节
+    
+    // 填充数据
+    copy(part1, []byte("Part 1 data"))
+    copy(part2, []byte("Part 2 data"))
+    copy(part3, []byte("Part 3 data"))
+    
+    // 分段释放内存 - 可以释放部分内存
+    allocator.Free(part1)  // 释放前256字节
+    allocator.Free(part2)  // 释放中间256字节
+    
+    // 继续使用剩余内存
+    copy(part3, []byte("Updated part 3"))
+    
+    // 最后释放剩余内存
+    allocator.Free(part3)
+}
+```
+
 ### 可回收内存
 
 ```go

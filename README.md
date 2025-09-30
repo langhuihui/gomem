@@ -54,6 +54,42 @@ func main() {
 }
 ```
 
+### Partial Memory Deallocation
+
+```go
+package main
+
+import "github.com/langhuihui/gomem"
+
+func main() {
+    // Create a scalable memory allocator
+    allocator := gomem.NewScalableMemoryAllocator(1024)
+    
+    // Allocate a large block of memory
+    buf := allocator.Malloc(1024)
+    
+    // Use different parts of the memory
+    part1 := buf[0:256]    // First 256 bytes
+    part2 := buf[256:512]  // Middle 256 bytes  
+    part3 := buf[512:1024] // Last 512 bytes
+    
+    // Fill with data
+    copy(part1, []byte("Part 1 data"))
+    copy(part2, []byte("Part 2 data"))
+    copy(part3, []byte("Part 3 data"))
+    
+    // Partial deallocation - can free parts of memory
+    allocator.Free(part1)  // Free first 256 bytes
+    allocator.Free(part2)  // Free middle 256 bytes
+    
+    // Continue using remaining memory
+    copy(part3, []byte("Updated part 3"))
+    
+    // Finally free remaining memory
+    allocator.Free(part3)
+}
+```
+
 ### Recyclable Memory
 
 ```go
@@ -192,17 +228,65 @@ The following benchmark results were obtained on Apple M2 Pro (ARM64) with Go 1.
 | Pool | 27,800 | 56,846 ns | 196,139 B | 0 |
 | NonPowerOf2 | 3,167,425 | 317.8 ns | 0 B | 0 |
 
+### ScalableMemoryAllocator Performance
+
+| Benchmark | Operations/sec | Time/op | Memory/op | Allocs/op |
+|-----------|----------------|---------|-----------|-----------|
+| **Basic Operations** |
+| Malloc | 92,943,320 | 13.22 ns | 0 B | 0 |
+| MallocSmall (64B) | 73,196,394 | 16.62 ns | 0 B | 0 |
+| MallocLarge (8KB) | 10,000 | 127,506 ns | 4,191,139 B | 5 |
+| **Memory Borrowing** |
+| Borrow | 221,620,256 | 5.425 ns | 0 B | 0 |
+| BorrowSmall (64B) | 90,733,239 | 13.38 ns | 0 B | 0 |
+| BorrowLarge (8KB) | 80,812,390 | 12.58 ns | 0 B | 0 |
+| **Allocation Patterns** |
+| SequentialAlloc | 789,878 | 1,541 ns | 0 B | 0 |
+| RandomAlloc | 32,514 | 38,625 ns | 1,197,044 B | 1 |
+| RandomBorrow | 144,988,590 | 8.261 ns | 0 B | 0 |
+| MixedPattern | 131,418,630 | 9.210 ns | 0 B | 0 |
+| **Advanced Operations** |
+| GetStats | 1,000,000,000 | 0.3013 ns | 0 B | 0 |
+| FreeRest | 52,918,608 | 23.25 ns | 0 B | 0 |
+| Scaling | 10,000 | 107,642 ns | 3,351,399 B | 4 |
+| Concurrent | 2,332,717 | 519.4 ns | 0 B | 0 |
+| MemoryPressure | 10,000 | 145,329 ns | 4,193,342 B | 7 |
+
+### RecyclableMemory Performance
+
+| Benchmark | Operations/sec | Time/op | Memory/op | Allocs/op |
+|-----------|----------------|---------|-----------|-----------|
+| NextN | 31,148,637 | 32.11 ns | 0 B | 0 |
+| BatchRecycle | 3,902,038 | 312.4 ns | 0 B | 0 |
+| WithRecycleIndexes | 3,706,173 | 331.5 ns | 0 B | 0 |
+
 ### Performance Summary
 
 - **Single-Tree Allocator**: Extremely fast allocation/deallocation with ~12ns per operation and zero memory allocations
 - **Two-Tree Allocator**: Slower allocation (~23ns per operation) but faster find operations (~1.5ns vs ~3ns)
-- **RecyclableMemory Enabled**: 53% faster than disabled version with better memory efficiency
-- **RecyclableMemory Disabled**: Simpler implementation but slower performance and higher memory usage
+- **ScalableMemoryAllocator**: High-performance scalable allocator with dynamic growth
+  - **Malloc operations**: ~13-17ns per operation with zero memory allocations
+  - **Borrow operations**: Extremely fast ~5-13ns per operation (borrowing is 2-3x faster than malloc)
+  - **Memory efficiency**: Zero garbage collection pressure for small/medium allocations
+  - **Scaling capability**: Automatically grows to accommodate larger allocations
+- **RecyclableMemory**: Efficient batch memory management
+  - **NextN operations**: ~32ns per operation with zero memory allocations
+  - **Batch recycling**: ~312ns for recycling 10 buffers at once
+  - **Memory efficiency**: 53% faster than disabled version with better memory efficiency
 - **Memory Operations**: Efficient buffer management with minimal overhead
 - **Memory Reader**: High-performance reading with zero-copy operations
 - **Buddy Allocator**: Fast power-of-2 allocation with pool support for reduced GC pressure
 
+**Key Performance Insights**:
+- **Borrow is fastest**: Borrow operations (5-13ns) are 2-3x faster than malloc operations (13-17ns)
+- **Zero GC pressure**: Most operations produce zero memory allocations
+- **Excellent scaling**: ScalableMemoryAllocator handles dynamic growth efficiently
+- **Batch efficiency**: RecyclableMemory provides efficient batch operations
+
 **Recommendations**: 
+- Use **ScalableMemoryAllocator** for applications requiring dynamic memory growth
+- Prefer **Borrow** over **Malloc** when possible for maximum performance
+- Use **RecyclableMemory** for batch operations requiring multiple allocations
 - Use single-tree allocator (default) for most applications due to superior allocation performance
 - Keep RecyclableMemory enabled (default) for better performance and memory efficiency
 - Only use two-tree allocator if find operations are critical and frequent
