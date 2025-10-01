@@ -137,6 +137,42 @@ n, err := reader.Read(buf)
 // buf now contains [1, 2, 3, 4, 5, 6]
 ```
 
+## Concurrency Safety
+
+⚠️ **Important**: Malloc and Free operations must be called from the same goroutine to avoid race conditions. For more elegant usage, consider using [gotask](https://github.com/langhuihui/gotask), where you can allocate memory in the `Start` method and free it in the `Dispose` method.
+
+```go
+// ❌ Wrong: Different goroutines
+go func() {
+    buf := allocator.Malloc(256)
+    // ... use buffer
+}()
+
+go func() {
+    allocator.Free(buf) // Race condition!
+}()
+
+// ✅ Correct: Same goroutine
+buf := allocator.Malloc(256)
+// ... use buffer
+allocator.Free(buf)
+
+// ✅ Elegant: Using gotask
+type MyTask struct {
+    allocator *gomem.ScalableMemoryAllocator
+    buffer []byte
+}
+
+func (t *MyTask) Start() {
+    t.allocator = gomem.NewScalableMemoryAllocator(1024)
+    t.buffer = t.allocator.Malloc(256)
+}
+
+func (t *MyTask) Dispose() {
+    t.allocator.Free(t.buffer)
+}
+```
+
 ## Performance Considerations
 
 - Use `enable_buddy` build tag for better memory pooling in high-throughput scenarios

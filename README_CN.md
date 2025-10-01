@@ -137,6 +137,42 @@ n, err := reader.Read(buf)
 // buf 现在包含 [1, 2, 3, 4, 5, 6]
 ```
 
+## 并发安全
+
+⚠️ **重要**: Malloc 和 Free 操作必须在同一个协程中调用，以避免竞态问题。为了更优雅的使用，建议使用 [gotask](https://github.com/langhuihui/gotask)，可以在 `Start` 方法中申请内存，在 `Dispose` 方法中释放内存。
+
+```go
+// ❌ 错误：不同的协程
+go func() {
+    buf := allocator.Malloc(256)
+    // ... 使用缓冲区
+}()
+
+go func() {
+    allocator.Free(buf) // 竞态条件！
+}()
+
+// ✅ 正确：同一个协程
+buf := allocator.Malloc(256)
+// ... 使用缓冲区
+allocator.Free(buf)
+
+// ✅ 优雅：使用 gotask
+type MyTask struct {
+    allocator *gomem.ScalableMemoryAllocator
+    buffer []byte
+}
+
+func (t *MyTask) Start() {
+    t.allocator = gomem.NewScalableMemoryAllocator(1024)
+    t.buffer = t.allocator.Malloc(256)
+}
+
+func (t *MyTask) Dispose() {
+    t.allocator.Free(t.buffer)
+}
+```
+
 ## 性能考虑
 
 - 在高吞吐量场景中使用 `enable_buddy` 构建标签以获得更好的内存池性能
