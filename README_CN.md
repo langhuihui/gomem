@@ -1,5 +1,9 @@
 # GoMem
 
+<div align="center">
+  <img src="logo.png" alt="GoMem Logo" width="200"/>
+</div>
+
 [![Go 版本](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat-square&logo=go)](https://golang.org/)
 [![许可证](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/langhuihui/gomem?style=flat-square)](https://goreportcard.com/report/github.com/langhuihui/gomem)
