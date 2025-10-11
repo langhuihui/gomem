@@ -10,35 +10,35 @@ import (
 func TestAllocator(t *testing.T) {
 	allocator := NewAllocator(1000)
 
-	// 分配内存
+	// Allocate memory
 	block1 := allocator.Allocate(100)
 	if block1 != 0 {
 		t.Error("Failed to allocate memory")
 	}
 
-	// 分配内存
+	// Allocate memory
 	block2 := allocator.Allocate(200)
 	if block2 != 100 {
 		t.Error("Failed to allocate memory")
 	}
 
-	// 释放内存
+	// Free memory
 	allocator.Free(0, 299)
 	if allocator.GetFreeSize() != 999 {
 		t.Error("Failed to free memory")
 	}
 	allocator.Free(299, 1)
 
-	// 重新分配内存
+	// Reallocate memory
 	block3 := allocator.Allocate(50)
 	if block3 != 0 {
 		t.Error("Failed to allocate memory")
 	}
 
-	// 释放内存
+	// Free memory
 	allocator.Free(0, 50)
 
-	// 分配大于剩余空间的内存
+	// Allocate memory larger than available space
 	block4 := allocator.Allocate(1000)
 	if block4 != 0 {
 		t.Error("Should not allocate memory larger than available space")

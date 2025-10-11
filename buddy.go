@@ -11,7 +11,7 @@ type Buddy struct {
 	longests   [BuddySize>>(MinPowerOf2-1) - 1]int
 	memoryPool [BuddySize]byte
 	poolStart  int64
-	lock       sync.Mutex // 保护 longests 数组的并发访问
+	lock       sync.Mutex // protects concurrent access to longests array
 }
 
 var (
@@ -24,13 +24,13 @@ var (
 	}
 )
 
-// GetBuddy 从池中获取一个 Buddy 实例
+// GetBuddy gets a Buddy instance from the pool
 func GetBuddy() *Buddy {
 	buddy := buddyPool.Get().(*Buddy)
 	return buddy
 }
 
-// PutBuddy 将 Buddy 实例放回池中
+// PutBuddy puts a Buddy instance back to the pool
 func PutBuddy(b *Buddy) {
 	buddyPool.Put(b)
 }

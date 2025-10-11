@@ -4,7 +4,6 @@ package gomem
 
 import (
 	"sync"
-	"unsafe"
 )
 
 var pool0, pool1, pool2 sync.Pool
@@ -31,18 +30,6 @@ func init() {
 		}
 		return ret
 	}
-}
-
-func createMemoryAllocator(size int) *MemoryAllocator {
-	memory := make([]byte, size)
-	ret := &MemoryAllocator{
-		allocator: NewAllocator(size),
-		Size:      size,
-		memory:    memory,
-		start:     int64(uintptr(unsafe.Pointer(&memory[0]))),
-	}
-	ret.allocator.Init(size)
-	return ret
 }
 
 func GetMemoryAllocator(size int) (ret *MemoryAllocator) {
