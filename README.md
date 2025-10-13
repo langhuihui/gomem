@@ -28,6 +28,7 @@ The library supports several build tags to customize behavior:
 - `enable_buddy`: Enable buddy allocator for memory pooling
 - `disable_rm`: Disable recyclable memory features for reduced overhead
 - `enable_mmap`: Enable memory-mapped allocation for improved memory efficiency (Linux/macOS/Windows)
+  - **Linux**: Automatically enables Transparent Huge Pages (THP) support, using 2MB huge pages instead of 4KB pages for significantly reduced TLB misses and improved memory access performance
 
 ## Installation
 
@@ -227,6 +228,14 @@ The MMAP implementation provides **dramatic improvements** in memory efficiency 
 ```bash
 go build -tags=enable_mmap
 ```
+
+**Linux THP Support:**
+When using `enable_mmap` on Linux, Transparent Huge Pages (THP) are automatically enabled:
+- Uses 2MB huge pages instead of 4KB small pages (on x86_64 architecture)
+- Significantly reduces TLB (Translation Lookaside Buffer) misses
+- Improves performance for large memory access patterns
+- Implemented via `madvise(MADV_HUGEPAGE)` system call
+- Gracefully falls back to regular pages if THP is not supported by the system
 
 ### Single-Tree vs Two-Tree Allocator Performance Comparison
 

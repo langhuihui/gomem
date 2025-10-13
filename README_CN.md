@@ -28,6 +28,7 @@ GoMem 是一个为 Go 语言设计的高性能内存分配器库，从 Monibuca 
 - `enable_buddy`: 启用伙伴分配器进行内存池管理
 - `disable_rm`: 禁用可回收内存功能以减少开销
 - `enable_mmap`: 启用内存映射分配以提高内存效率（支持 Linux/macOS/Windows）
+  - **Linux**: 自动启用透明大页（THP）支持，使用 2MB 大页替代 4KB 页面，显著减少 TLB 缺失并提升内存访问性能
 
 ## 安装
 
@@ -227,6 +228,14 @@ MMAP 实现在内存效率方面提供了**显著的改进**，且性能开销�
 ```bash
 go build -tags=enable_mmap
 ```
+
+**Linux THP 支持：**
+在 Linux 上使用 `enable_mmap` 时，会自动启用透明大页（Transparent Huge Pages，THP）：
+- 使用 2MB 大页替代 4KB 小页（x86_64 架构）
+- 显著减少 TLB（Translation Lookaside Buffer）缺失
+- 提升大块内存访问性能
+- 通过 `madvise(MADV_HUGEPAGE)` 系统调用实现
+- 如果系统不支持 THP，会静默降级到常规页面，不影响程序运行
 
 ### 单树 vs 双树分配器性能比较
 

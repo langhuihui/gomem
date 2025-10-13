@@ -1,4 +1,4 @@
-//go:build (linux || darwin) && enable_mmap
+//go:build darwin && enable_mmap
 
 package gomem
 
