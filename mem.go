@@ -85,7 +85,14 @@ func (m *Memory) WriteTo(w io.Writer) (n int64, err error) {
 }
 
 // Reset clears all buffers and resets the size to zero.
+// clear() is called first to nil-out stale []byte slice headers in the
+// backing array so the Go GC can collect the underlying memory allocator
+// child slabs (ScalableMemoryAllocator children) that those slices
+// referenced.  Without this, the backing array's capacity region retains
+// live pointers that prevent GC collection even after sma.Free() marks the
+// regions logically free.
 func (m *Memory) Reset() {
+	clear(m.Buffers)
 	m.Buffers = m.Buffers[:0]
 	m.Size = 0
 }

@@ -228,6 +228,32 @@ func (sma *ScalableMemoryAllocator) Borrow(size int) (memory []byte) {
 	return
 }
 
+// Trim 移除 children 中所有完全空闲的子分配器，释放未被引用的内存。
+// 注意：仅在确认子分配器管理的所有 []byte 切片均已通过 Free() 归还后才安全调用。
+// Malloc 会在新增子分配器前自动调用 Trim。
+func (sma *ScalableMemoryAllocator) Trim() {
+	trimmed := sma.children[:0]
+	for _, child := range sma.children {
+		if child.allocator.GetFreeSize() == child.Size {
+			// 该子分配器内所有字节均已归还，安全移除以让 GC 回收
+			sma.size -= child.Size
+			if child.recycle != nil {
+				child.recycle()
+			}
+		} else {
+			trimmed = append(trimmed, child)
+		}
+	}
+	sma.children = trimmed
+	// Trim 后重置 childSize，避免下次扩容直接开大块
+	if len(sma.children) == 0 {
+		sma.childSize = sma.size
+		if sma.childSize == 0 {
+			sma.childSize = defaultBufSize
+		}
+	}
+}
+
 func (sma *ScalableMemoryAllocator) Malloc(size int) (memory []byte) {
 	if sma == nil || size > MaxBlockSize {
 		return make([]byte, size)
@@ -239,6 +265,15 @@ func (sma *ScalableMemoryAllocator) Malloc(size int) (memory []byte) {
 			return
 		}
 	}
+	// 所有 children 均满：先 Trim 回收完全空闲的子分配器
+	sma.Trim()
+	// Trim 后再尝试一次已有 children（可能刚被重置过）
+	for _, child = range sma.children {
+		if memory = child.Malloc(size); memory != nil {
+			return
+		}
+	}
+	// 仍然不够：扩容
 	for sma.childSize < MaxBlockSize {
 		sma.childSize = sma.childSize << 1
 		if sma.childSize >= size {
