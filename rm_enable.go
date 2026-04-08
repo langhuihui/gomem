@@ -314,7 +314,7 @@ func (sma *ScalableMemoryAllocator) FreeRest(mem *[]byte, keep int) {
 }
 
 func (sma *ScalableMemoryAllocator) Free(mem []byte) bool {
-	if sma == nil {
+	if sma == nil || len(mem) == 0 {
 		return false
 	}
 	ptr := int64(uintptr(unsafe.Pointer(&mem[0])))
