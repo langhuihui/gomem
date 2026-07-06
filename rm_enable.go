@@ -96,6 +96,10 @@ func (r *RecyclableMemory) SetAllocator(allocator *ScalableMemoryAllocator) {
 }
 
 func (r *RecyclableMemory) Recycle() {
+	if r.allocator == nil {
+		r.Reset()
+		return
+	}
 	if r.recycleIndexes != nil {
 		for _, index := range r.recycleIndexes {
 			r.allocator.Free(r.Buffers[index])
@@ -338,7 +342,7 @@ func (sma *ScalableMemoryAllocator) Free(mem []byte) bool {
 	for i, child := range sma.children {
 		if start := int(ptr - child.start); start >= 0 && start < child.Size && child.free(start, size) {
 			sma.addFreeCount(size)
-			if len(sma.children) > 1 && child.allocator.sizeTree.End-child.allocator.sizeTree.Start == child.Size {
+			if len(sma.children) > 1 && child.allocator != nil && child.allocator.sizeTree.End-child.allocator.sizeTree.Start == child.Size {
 				child.Recycle()
 				sma.children = slices.Delete(sma.children, i, i+1)
 				sma.size -= child.Size
