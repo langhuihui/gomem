@@ -48,6 +48,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"sync"
 	"unsafe"
 )
 
@@ -151,6 +152,7 @@ func (ma *MemoryAllocator) GetBlocks() (blocks []*Block) {
 }
 
 type ScalableMemoryAllocator struct {
+	mu          sync.Mutex
 	children    []*MemoryAllocator
 	totalMalloc int64
 	totalFree   int64
@@ -185,18 +187,26 @@ func (sma *ScalableMemoryAllocator) addFreeCount(size int) {
 }
 
 func (sma *ScalableMemoryAllocator) GetTotalMalloc() int64 {
+	sma.mu.Lock()
+	defer sma.mu.Unlock()
 	return sma.totalMalloc
 }
 
 func (sma *ScalableMemoryAllocator) GetTotalFree() int64 {
+	sma.mu.Lock()
+	defer sma.mu.Unlock()
 	return sma.totalFree
 }
 
 func (sma *ScalableMemoryAllocator) GetChildren() []*MemoryAllocator {
+	sma.mu.Lock()
+	defer sma.mu.Unlock()
 	return sma.children
 }
 
 func (sma *ScalableMemoryAllocator) Recycle() {
+	sma.mu.Lock()
+	defer sma.mu.Unlock()
 	for _, child := range sma.children {
 		child.Recycle()
 	}
@@ -208,7 +218,9 @@ func (sma *ScalableMemoryAllocator) Borrow(size int) (memory []byte) {
 	if sma == nil || size > MaxBlockSize {
 		return
 	}
-	defer sma.addMallocCount(size)
+	sma.mu.Lock()
+	defer sma.mu.Unlock()
+	defer sma.addMallocCount(size) // LIFO: runs before Unlock, while lock is held
 	var child *MemoryAllocator
 	for _, child = range sma.children {
 		if memory = child.Find(size); memory != nil {
@@ -258,7 +270,9 @@ func (sma *ScalableMemoryAllocator) Malloc(size int) (memory []byte) {
 	if sma == nil || size > MaxBlockSize {
 		return make([]byte, size)
 	}
-	defer sma.addMallocCount(size)
+	sma.mu.Lock()
+	defer sma.mu.Unlock()
+	defer sma.addMallocCount(size) // LIFO: runs before Unlock, while lock is held
 	var child *MemoryAllocator
 	for _, child = range sma.children {
 		if memory = child.Malloc(size); memory != nil {
@@ -317,6 +331,8 @@ func (sma *ScalableMemoryAllocator) Free(mem []byte) bool {
 	if sma == nil || len(mem) == 0 {
 		return false
 	}
+	sma.mu.Lock()
+	defer sma.mu.Unlock()
 	ptr := int64(uintptr(unsafe.Pointer(&mem[0])))
 	size := len(mem)
 	for i, child := range sma.children {

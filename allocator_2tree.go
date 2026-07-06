@@ -70,6 +70,12 @@ func (b *Block) insert(block *Block, treeIndex int) *Block {
 	if b == nil {
 		return block
 	}
+	if b == block {
+		// block is already in the tree; duplicate insert must not happen.
+		// Returning b prevents a self-referencing right cycle that
+		// rotateLeft would then convert into a fatal left cycle.
+		return b
+	}
 	if tree := &b.trees[treeIndex]; compares[treeIndex](block, b) {
 		tree.left = tree.left.insert(block, treeIndex)
 	} else {
@@ -354,7 +360,11 @@ func (b *Block) Walk(fn func(*Block), index int) {
 	if b == nil {
 		return
 	}
-	b.trees[index].left.Walk(fn, index)
+	// Save children before fn(b) because fn (e.g. putBlock) may overwrite
+	// b.trees, causing the right subtree to be silently skipped.
+	left := b.trees[index].left
+	right := b.trees[index].right
+	left.Walk(fn, index)
 	fn(b)
-	b.trees[index].right.Walk(fn, index)
+	right.Walk(fn, index)
 }
