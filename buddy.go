@@ -17,20 +17,15 @@ type Buddy struct {
 var (
 	InValidParameterErr = errors.New("buddy: invalid parameter")
 	NotFoundErr         = errors.New("buddy: can't find block")
-	buddyPool           = sync.Pool{
-		New: func() interface{} {
-			return NewBuddy()
-		},
-	}
+	buddyPool           = NewPool(NewBuddy)
 )
 
-// GetBuddy gets a Buddy instance from the pool
+// GetBuddy gets a Buddy instance from the pool.
 func GetBuddy() *Buddy {
-	buddy := buddyPool.Get().(*Buddy)
-	return buddy
+	return buddyPool.Get()
 }
 
-// PutBuddy puts a Buddy instance back to the pool
+// PutBuddy puts a Buddy instance back to the pool.
 func PutBuddy(b *Buddy) {
 	buddyPool.Put(b)
 }
