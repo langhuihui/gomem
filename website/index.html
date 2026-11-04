@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="GoMem：高性能 Go 内存分配器。单棵 Treap 管理空闲块，约 12ns 一次分配、零 GC 压力。" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'" />
+  <title>GoMem · 高性能 Go 内存分配器</title>
+  <link rel="icon" href="logo.png" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="nav" id="nav">
+    <div class="container nav-inner">
+      <a class="brand" href="#top">
+        <img src="logo.png" alt="" width="32" height="32" />
+        <span>GoMem</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#how">原理动画</a>
+        <a href="#features">特性</a>
+        <a href="#bench">性能</a>
+        <a href="#usage">使用</a>
+        <a class="btn btn-ghost btn-sm" href="https://github.com/langhuihui/gomem" target="_blank" rel="noopener noreferrer">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- ================= HERO ================= -->
+    <section class="hero">
+      <div class="container hero-inner">
+        <div class="hero-text reveal">
+          <span class="pill">源自 Monibuca 流媒体服务器</span>
+          <h1>
+            一棵树，<br />
+            <span class="grad">管住每一个字节</span>
+          </h1>
+          <p class="lead">
+            GoMem 是为 Go 打造的高性能内存分配器。它用<strong>单棵 Treap</strong>同时维护空闲块的
+            <em>地址顺序</em>与<em>大小顺序</em>：分配约 <strong>12ns</strong>，释放自动合并相邻块，节点对象池化复用，
+            <strong>零 GC 压力</strong>。
+          </p>
+          <div class="hero-cta">
+            <a class="btn btn-primary" href="#how">观看分配/回收动画</a>
+            <button class="btn btn-ghost install" id="copyInstall" type="button" title="点击复制">
+              <span class="prompt">$</span><code id="installCmd">go get github.com/langhuihui/gomem</code>
+              <span class="copy-tip" id="copyTip">复制</span>
+            </button>
+          </div>
+          <ul class="hero-stats">
+            <li><b>~12ns</b><span>单次分配</span></li>
+            <li><b>0</b><span>allocs/op</span></li>
+            <li><b>408×</b><span>mmap 创建提速</span></li>
+            <li><b>-99.98%</b><span>初始内存占用</span></li>
+          </ul>
+        </div>
+        <div class="hero-visual reveal" aria-hidden="true">
+          <div class="orbit">
+            <img src="logo.png" alt="" class="hero-logo" />
+          </div>
+          <svg class="hero-tree" viewBox="0 0 320 200">
+            <g class="ht-edges">
+              <path d="M160 30 L90 90" /><path d="M160 30 L230 90" />
+              <path d="M90 90 L50 150" /><path d="M90 90 L130 150" /><path d="M230 90 L270 150" />
+            </g>
+            <g class="ht-nodes">
+              <rect x="136" y="16" width="48" height="28" rx="8" /><rect x="66" y="76" width="48" height="28" rx="8" />
+              <rect x="206" y="76" width="48" height="28" rx="8" /><rect x="26" y="136" width="48" height="28" rx="8" />
+              <rect x="106" y="136" width="48" height="28" rx="8" /><rect x="246" y="136" width="48" height="28" rx="8" />
+            </g>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= HOW IT WORKS ================= -->
+    <section class="section" id="how">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">How it works</span>
+          <h2>看懂这棵树：分配与回收的全过程</h2>
+          <p>下面的动画由 <code>allocator.go</code> 的逐行 JS 移植驱动，每一次比较、旋转、摘除、合并都会被真实地播放出来。</p>
+        </div>
+
+        <div class="principles reveal">
+          <div class="pcard">
+            <div class="pnum">01</div>
+            <h3>一棵树，两种秩序</h3>
+            <p>每个空闲块是一个节点。<b>横向</b>按 <code>Start</code> 构成二叉搜索树（中序 = 地址顺序），便于找相邻块；<b>纵向</b>按 <code>size</code> 通过旋转维持堆序，小块上浮。</p>
+          </div>
+          <div class="pcard">
+            <div class="pnum">02</div>
+            <h3>分配：找 → 摘 → 切 → 插</h3>
+            <p><code>find</code> 沿树寻找够大的块并尽量向左找更贴合的；选中后旋转<b>下沉成叶子</b>再摘除，切下头部 <code>size</code> 字节，剩余部分重新插入。</p>
+          </div>
+          <div class="pcard">
+            <div class="pnum">03</div>
+            <h3>回收：找邻居 → 合并 → 插</h3>
+            <p>按地址在树中查找 <code>End == offset</code> 的左邻与 <code>Start == offset+size</code> 的右邻，能合并就合并，被吞并的节点回到<b>对象池</b>，避免 GC。</p>
+          </div>
+        </div>
+
+        <div class="viz reveal" id="viz">
+          <div class="viz-toolbar">
+            <form class="tb-group" id="allocForm" autocomplete="off">
+              <label for="sizeInput">分配大小</label>
+              <input type="number" id="sizeInput" min="1" max="1024" step="1" value="128" inputmode="numeric" />
+              <button class="btn btn-primary btn-sm" type="submit">Allocate</button>
+              <div class="quick" id="quickSizes">
+                <button type="button" class="chip" data-size="32">32</button>
+                <button type="button" class="chip" data-size="64">64</button>
+                <button type="button" class="chip" data-size="128">128</button>
+                <button type="button" class="chip" data-size="256">256</button>
+              </div>
+            </form>
+            <div class="tb-group">
+              <button class="btn btn-ghost btn-sm" id="btnRandom" type="button">随机操作</button>
+              <button class="btn btn-accent btn-sm" id="btnDemo" type="button">自动演示</button>
+              <button class="btn btn-ghost btn-sm" id="btnReset" type="button">重置</button>
+            </div>
+          </div>
+
+          <div class="viz-main">
+            <div class="viz-stage">
+              <svg id="treeSvg" viewBox="0 0 960 470" role="img" aria-label="Treap 结构动画"></svg>
+              <div class="legend">
+                <span><i class="lg lg-visit"></i>访问路径</span>
+                <span><i class="lg lg-cand"></i>候选块</span>
+                <span><i class="lg lg-target"></i>选中/删除</span>
+                <span><i class="lg lg-rotate"></i>旋转</span>
+                <span><i class="lg lg-new"></i>插入/合并结果</span>
+                <span><i class="lg lg-merge"></i>相邻块</span>
+              </div>
+            </div>
+            <aside class="viz-side">
+              <div class="step-card">
+                <div class="step-head">
+                  <span class="step-op" id="stepOp">就绪</span>
+                  <span class="step-idx" id="stepIdx"></span>
+                </div>
+                <p class="step-desc" id="stepDesc">初始状态：整块 1024 字节都是空闲的，树中只有一个节点。点击上方按钮开始分配，或直接点「自动演示」。</p>
+              </div>
+              <div class="code-card">
+                <div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code-fn" id="codeFn">allocator.go</span></div>
+                <div class="code-body" id="codeBody"></div>
+              </div>
+            </aside>
+          </div>
+
+          <div class="membar-wrap">
+            <div class="membar-head">
+              <span>内存池 <code>[0, 1024)</code></span>
+              <span class="membar-legend">
+                <span><i class="lg lg-free"></i>空闲（树中节点）</span>
+                <span><i class="lg lg-alloc"></i>已分配（点击释放）</span>
+              </span>
+            </div>
+            <div class="membar" id="memBar"></div>
+            <div class="membar-ticks"><span>0</span><span>256</span><span>512</span><span>768</span><span>1024</span></div>
+          </div>
+
+          <div class="viz-bottom">
+            <div class="player">
+              <button class="btn btn-ghost btn-sm" id="btnPlay" type="button" aria-pressed="true">暂停</button>
+              <button class="btn btn-ghost btn-sm" id="btnStep" type="button">单步 ▸</button>
+              <button class="btn btn-ghost btn-sm" id="btnSkip" type="button">跳到结果 »</button>
+              <label class="speed">速度
+                <input type="range" id="speed" min="0.25" max="4" step="0.25" value="1" />
+                <output id="speedOut">1×</output>
+              </label>
+              <span class="queue-info" id="queueInfo"></span>
+            </div>
+            <div class="bottom-grid">
+              <div>
+                <h4>已分配的内存块</h4>
+                <div class="alloc-list" id="allocList"><span class="muted">暂无</span></div>
+              </div>
+              <div>
+                <h4>操作记录</h4>
+                <ol class="oplog" id="opLog"></ol>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= FEATURES ================= -->
+    <section class="section" id="features">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">Features</span>
+          <h2>为高吞吐场景而生</h2>
+        </div>
+        <div class="features">
+          <div class="fcard reveal"><div class="ficon">Treap</div><h3>多种分配策略</h3><p>默认单棵 Treap，分配快 77–86%；也可用 <code>twotree</code> 标签切换为双 AVL 树，Find 快一倍。</p></div>
+          <div class="fcard reveal"><div class="ficon">Buddy</div><h3>伙伴分配器</h3><p>通过 <code>enable_buddy</code> 启用 Buddy 系统做内存池化，大块内存按 2 的幂高效复用。</p></div>
+          <div class="fcard reveal"><div class="ficon">RM</div><h3>可回收内存</h3><p><code>RecyclableMemory</code> 批量分配、一次性回收，比关闭时快 53%，内存占用更低。</p></div>
+          <div class="fcard reveal"><div class="ficon">Scale</div><h3>可扩展分配器</h3><p><code>ScalableMemoryAllocator</code> 空间不足时自动扩容子分配器，Borrow 仅需 ~5ns。</p></div>
+          <div class="fcard reveal"><div class="ficon">Reader</div><h3>零拷贝 Reader</h3><p>多缓冲区读取器，跨 buffer 读取、Skip、Range、LEB128 解码均无需拷贝。</p></div>
+          <div class="fcard reveal"><div class="ficon">mmap</div><h3>mmap + 透明大页</h3><p><code>enable_mmap</code> 惰性占用物理内存；Linux 上自动开启 THP，显著降低 TLB miss。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= BENCH ================= -->
+    <section class="section" id="bench">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">Benchmarks</span>
+          <h2>数字说话</h2>
+          <p>Apple M2 Pro (ARM64) · Go 1.23.0</p>
+        </div>
+        <div class="bench-grid">
+          <div class="bcard reveal">
+            <h3>单树 vs 双树：分配耗时 <small>ns/op，越短越好</small></h3>
+            <div class="bars" data-max="25">
+              <div class="bar-row"><span class="bl">Basic</span><div class="bt"><div class="bf a" data-v="12.33"></div></div><span class="bv">12.33</span></div>
+              <div class="bar-row"><span class="bl"></span><div class="bt"><div class="bf b" data-v="22.71"></div></div><span class="bv">22.71</span></div>
+              <div class="bar-row"><span class="bl">64B</span><div class="bt"><div class="bf a" data-v="12.32"></div></div><span class="bv">12.32</span></div>
+              <div class="bar-row"><span class="bl"></span><div class="bt"><div class="bf b" data-v="22.60"></div></div><span class="bv">22.60</span></div>
+              <div class="bar-row"><span class="bl">8KB</span><div class="bt"><div class="bf a" data-v="12.14"></div></div><span class="bv">12.14</span></div>
+              <div class="bar-row"><span class="bl"></span><div class="bt"><div class="bf b" data-v="22.61"></div></div><span class="bv">22.61</span></div>
+              <div class="bar-row"><span class="bl">Random</span><div class="bt"><div class="bf a" data-v="12.47"></div></div><span class="bv">12.47</span></div>
+              <div class="bar-row"><span class="bl"></span><div class="bt"><div class="bf b" data-v="23.02"></div></div><span class="bv">23.02</span></div>
+            </div>
+            <div class="bar-legend"><span><i class="lg lg-a"></i>单树 Treap（默认）</span><span><i class="lg lg-b"></i>双树 AVL</span></div>
+          </div>
+          <div class="bcard reveal">
+            <h3>MMAP：分配器创建 <small>16MB</small></h3>
+            <div class="big-compare">
+              <div><b>317.2µs</b><span>默认 · 16,777,405 B</span></div>
+              <div class="arrow">→</div>
+              <div class="win"><b>777ns</b><span>mmap · 216 B</span></div>
+            </div>
+            <div class="kpis">
+              <div><b>408×</b><span>创建更快</span></div>
+              <div><b>59.8%</b><span>整体更快 (geomean)</span></div>
+              <div><b>86.6%</b><span>内存减少 (geomean)</span></div>
+            </div>
+          </div>
+          <div class="bcard reveal">
+            <h3>ScalableMemoryAllocator</h3>
+            <div class="kpis kpis-col">
+              <div><b>5.4ns</b><span>Borrow</span></div>
+              <div><b>13.2ns</b><span>Malloc</span></div>
+              <div><b>23.3ns</b><span>FreeRest</span></div>
+              <div><b>0 B</b><span>每次操作堆分配</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= USAGE ================= -->
+    <section class="section" id="usage">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">Get started</span>
+          <h2>三行代码上手</h2>
+        </div>
+        <div class="usage reveal">
+          <div class="tabs" role="tablist">
+            <button class="tab active" role="tab" data-tab="t-basic" type="button">基础分配</button>
+            <button class="tab" role="tab" data-tab="t-partial" type="button">部分释放</button>
+            <button class="tab" role="tab" data-tab="t-rm" type="button">可回收内存</button>
+            <button class="tab" role="tab" data-tab="t-tags" type="button">构建标签</button>
+          </div>
+          <div class="tab-panels">
+<pre class="tab-panel active" id="t-basic"><code>package main
+
+import "github.com/langhuihui/gomem"
+
+func main() {
+    // 创建可扩展分配器
+    allocator := gomem.NewScalableMemoryAllocator(1024)
+
+    buf := allocator.Malloc(256)            // 分配
+    copy(buf, []byte("Hello, World!"))      // 使用
+    allocator.Free(buf)                     // 释放（自动与相邻空闲块合并）
+}</code></pre>
+<pre class="tab-panel" id="t-partial"><code>allocator := gomem.NewScalableMemoryAllocator(1024)
+buf := allocator.Malloc(1024)
+
+part1 := buf[0:256]
+part2 := buf[256:512]
+part3 := buf[512:1024]
+
+allocator.Free(part1)   // 可以只释放其中一段
+allocator.Free(part2)   // 与 part1 合并成 [0, 512)
+copy(part3, []byte("still usable"))
+allocator.Free(part3)   // 全部归还，树重新回到一个节点</code></pre>
+<pre class="tab-panel" id="t-rm"><code>allocator := gomem.NewScalableMemoryAllocator(1024)
+rm := gomem.NewRecyclableMemory(allocator)
+
+buf1 := rm.NextN(128)
+buf2 := rm.NextN(256)
+copy(buf1, []byte("Buffer 1"))
+copy(buf2, []byte("Buffer 2"))
+
+rm.Recycle()            // 一次性回收全部内存</code></pre>
+<pre class="tab-panel" id="t-tags"><code># 双 AVL 树实现（Find 更快）
+go build -tags=twotree
+
+# 启用伙伴分配器做内存池化
+go build -tags=enable_buddy
+
+# 关闭可回收内存特性
+go build -tags=disable_rm
+
+# mmap 分配（Linux 自动启用透明大页 THP）
+go build -tags=enable_mmap</code></pre>
+          </div>
+          <div class="note">
+            <b>并发提示：</b>同一个分配器的 <code>Malloc</code> 与 <code>Free</code> 应在同一个 goroutine 中调用。
+            推荐搭配 <a href="https://github.com/langhuihui/gotask" target="_blank" rel="noopener noreferrer">gotask</a>：在 <code>Start</code> 中分配、在 <code>Dispose</code> 中释放。
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="brand"><img src="logo.png" alt="" width="24" height="24" /><span>GoMem</span></div>
+      <p>MIT License · Built by the GoMem team</p>
+      <a href="https://github.com/langhuihui/gomem" target="_blank" rel="noopener noreferrer">github.com/langhuihui/gomem</a>
+    </div>
+  </footer>
+
+  <script src="js/treap.js"></script>
+  <script src="js/visualizer.js"></script>
+  <script src="js/site.js"></script>
+</body>
+</html>
